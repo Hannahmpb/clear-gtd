@@ -939,10 +939,19 @@ function importFile(e) {
 }
 
 /* ============ SUPABASE SYNC ============ */
-let syncTimer = null, syncing = false;
+let syncTimer = null, syncing = false, lastSyncErr = null;
 function setDot(state) { const d = $("#sync-dot"); d.className = "sync-dot" + (state ? " " + state : ""); }
 function sbHeaders() {
-  return { "apikey": meta.sync.key, "Authorization": "Bearer " + meta.sync.key, "Content-Type": "application/json" };
+  const h = { "apikey": meta.sync.key, "Content-Type": "application/json" };
+  // Legacy anon keys are JWTs and also go in the Authorization header.
+  // New sb_publishable_ / sb_secret_ keys must NOT be sent as a Bearer token.
+  if (meta.sync.key.startsWith("eyJ")) h["Authorization"] = "Bearer " + meta.sync.key;
+  return h;
+}
+async function httpErr(r, stage) {
+  let detail = "";
+  try { detail = (await r.text()).slice(0, 180); } catch(e){}
+  return new Error(stage + " failed: HTTP " + r.status + (detail ? " · " + detail : ""));
 }
 function scheduleSync() {
   if (!meta.sync.url || !meta.sync.key) return;
@@ -964,14 +973,14 @@ async function syncNow() {
           headers: Object.assign(sbHeaders(), { "Prefer": "resolution=merge-duplicates" }),
           body: JSON.stringify(payload)
         });
-        if (!r.ok) throw new Error("push " + r.status);
+        if (!r.ok) throw await httpErr(r, "push");
       }
       dirty.clear();
     }
     // pull
     const since = meta.sync.lastPull || "1970-01-01";
     const r2 = await fetch(base + "?select=id,data,updated&updated=gt." + encodeURIComponent(since) + "&order=updated.asc", { headers: sbHeaders() });
-    if (!r2.ok) throw new Error("pull " + r2.status);
+    if (!r2.ok) throw await httpErr(r2, "pull");
     const rows = await r2.json();
     let changed = false;
     rows.forEach(row => {
@@ -983,12 +992,19 @@ async function syncNow() {
     });
     save();
     if (changed) render();
+    lastSyncErr = null;
     setDot("ok");
   } catch (err) {
     console.warn("sync failed", err);
+    lastSyncErr = (err && err.message) ? err.message : String(err);
     setDot("err");
   } finally { syncing = false; }
 }
+$("#sync-dot").addEventListener("click", () => {
+  if (!meta.sync.url || !meta.sync.key) { toast("Sync is off. Add Supabase details in Settings"); return; }
+  if (lastSyncErr) { alert("Sync error:\n\n" + lastSyncErr + "\n\nCheck the Project URL and anon key in Settings, and that the SQL setup step was run."); }
+  else { toast(syncing ? "Syncing…" : "Sync is healthy ✓"); syncNow(); }
+});
 
 /* ============ GLOBAL ACTIONS ============ */
 document.addEventListener("click", e => {
