@@ -55,7 +55,14 @@ export function Header() {
   return (
     <header className="hdr">
       <div>
-        <h1>{title}</h1>
+        <h1>
+          {title}
+          {view === "inbox" && (
+            <span className="hdr-cat" role="img" aria-label="cat">
+              🐱
+            </span>
+          )}
+        </h1>
         <div className="sub">{sub}</div>
       </div>
       <div className="hdr-btns">
